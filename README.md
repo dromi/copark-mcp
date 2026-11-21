@@ -13,16 +13,37 @@ cleaners, a babysitter or family visiting on a regular basis.
 
 | MCP tool | CLI | What it does |
 |---|---|---|
-| `order_guest_permit(plate)` | `copark-mcp order AB12345` | Orders a guest permit for a number plate, starting now |
+| `order_guest_permit(plate_or_name)` | `copark-mcp order parents` | Orders a guest permit, starting now, for a plate or a saved name |
+| `save_plate(name, plate, aliases)` | `copark-mcp save parents AB12345 "mom and dad"` | Saves a plate under a name, checks it against the vehicle register |
+| `list_saved_plates()` | `copark-mcp plates` | Saved plates with names, aliases and car descriptions |
+| `remove_saved_plate(name)` | `copark-mcp forget parents` | Deletes a saved plate |
 | `list_permits()` | `copark-mcp list` | Currently active permits |
 | `permit_history(limit)` | `copark-mcp history 20` | Past guest permits, newest first |
-| `guest_permit_usage(months)` | `copark-mcp usage` | Guest permits per month and per plate, plus how many are left if you set a monthly limit |
+| `guest_permit_usage(months)` | `copark-mcp usage` | Guest permits per month and per plate (with saved names), plus how many are left if you set a monthly limit |
 | `lookup_plate(plate)` | | Car description for a Danish plate |
 | `list_products()` | `copark-mcp products` | Permit products on your account |
 
 Your guest permit product is found automatically. If your account has more than one (for example
 2-hour and 24-hour permits), set `COPARK_GUEST_PRODUCT_ID` to the one you want; `copark-mcp products`
 lists them.
+
+## Saved plates
+
+Save the plates you use often under a name, then order by name:
+
+```bash
+copark-mcp save cleaners AB12345 "rengøringen"
+copark-mcp save parents CD67890 "mom and dad" "mor og far"
+copark-mcp order cleaners
+```
+
+From Claude, just say "save my parents' plate CD67890" and later "get a guest permit for mom and dad".
+The server matches names and aliases exactly (ignoring case); the tool descriptions tell the model
+to check the saved list and map looser wording to the right name, and to ask when it's unsure.
+If a name isn't found, the error lists the saved names so the model can pick the right one.
+
+Saved plates live in `~/.config/copark-mcp/plates.json` on the machine running the server,
+never in the repository. History and usage are labelled with saved names.
 
 ## Requirements
 
@@ -101,11 +122,11 @@ No LLM is needed for a fixed schedule; cron and the CLI are enough.
 
 ```cron
 # Every Monday at 07:30
-30 7 * * 1  ~/.local/bin/copark-mcp order AB12345 >> ~/copark.log 2>&1
+30 7 * * 1  ~/.local/bin/copark-mcp order cleaners >> ~/copark.log 2>&1
 
 # Every third Tuesday: cron can't count weeks, so check the ISO week number.
 # Change "-eq 0" to 1 or 2 to shift which week it fires.
-30 7 * * 2  [ $(( $(date +\%V) \% 3 )) -eq 0 ] && ~/.local/bin/copark-mcp order AB12345 >> ~/copark.log 2>&1
+30 7 * * 2  [ $(( $(date +\%V) \% 3 )) -eq 0 ] && ~/.local/bin/copark-mcp order cleaners >> ~/copark.log 2>&1
 ```
 
 ## Limitations

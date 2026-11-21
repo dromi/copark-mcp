@@ -23,13 +23,18 @@ Settings:
   COPARK_MCP_PATH          optional; URL path for --http (default /mcp)
   COPARK_MCP_ALLOWED_HOSTS optional; public hostname(s) the --http server is reached by, comma-
                            separated. Requests for other hosts are rejected. Unset: no host check
-  COPARK_CONFIG_DIR        optional; where env + token live (default ~/.config/copark-mcp)
+  COPARK_CONFIG_DIR        optional; where env, token and saved plates (plates.json) live
+                           (default ~/.config/copark-mcp)
 
 Usage:
   copark-mcp setup              first-time setup: credentials, limit, test login
   copark-mcp                    MCP over stdio
   copark-mcp --http [port]      MCP over streamable HTTP (default port 8766)
-  copark-mcp order <plate>      order a guest permit now
+  copark-mcp order <plate|name> order a guest permit now, for a plate or a saved name
+  copark-mcp save <name> <plate> [alias...]
+                                save a plate under a name, e.g. save parents AB12345 "mom and dad"
+  copark-mcp plates             saved plates
+  copark-mcp forget <name>      delete a saved plate
   copark-mcp list               active permits
   copark-mcp history [n]        last n guest permits (default 20)
   copark-mcp usage [months]     guest permits per month
@@ -111,6 +116,90 @@ def _agreement(a: dict) -> dict:
     }
 
 
+class SavedPlates:
+    """Named number plates ("parents", "cleaners"), stored as JSON next to the config.
+
+    Matching here is exact (case-insensitive) on the name or one of its aliases. Mapping
+    looser wording ("mom and dad" -> "parents") is left to the MCP client, which gets the
+    saved list from list_saved_plates or from the error when a name isn't found.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def _load(self) -> dict[str, dict]:
+        try:
+            return json.loads(self.path.read_text())
+        except FileNotFoundError:
+            return {}
+
+    def _store(self, data: dict[str, dict]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+        os.chmod(tmp, 0o600)
+        tmp.replace(self.path)
+
+    @staticmethod
+    def _key(name: str) -> str:
+        return " ".join(name.lower().split())
+
+    def all(self) -> list[dict]:
+        return [{"name": k, **v} for k, v in sorted(self._load().items())]
+
+    def find(self, name: str) -> tuple[str, dict] | None:
+        key = self._key(name)
+        for k, v in self._load().items():
+            if key == k or key in (self._key(a) for a in v.get("aliases", [])):
+                return k, v
+        return None
+
+    def name_for_plate(self, plate: str) -> str | None:
+        for k, v in self._load().items():
+            if v.get("plate") == plate:
+                return k
+        return None
+
+    def save(self, name: str, plate: str, aliases: list[str] | None = None,
+             car: str | None = None, note: str | None = None) -> dict:
+        key = self._key(name)
+        if not key:
+            raise CoParkError("Name can't be empty.")
+        data = self._load()
+        entry = {
+            "plate": normalize_plate(plate),
+            "aliases": sorted({self._key(a) for a in (aliases or []) if self._key(a) and self._key(a) != key}),
+            "car": car,
+            "note": note or None,
+        }
+        data[key] = entry
+        self._store(data)
+        return {"name": key, **entry}
+
+    def remove(self, name: str) -> bool:
+        found = self.find(name)
+        if not found:
+            return False
+        data = self._load()
+        del data[found[0]]
+        self._store(data)
+        return True
+
+    def resolve(self, plate_or_name: str) -> tuple[str, str | None]:
+        """Return (plate, saved name). Raises with the saved names if nothing matches."""
+        found = self.find(plate_or_name)
+        if found:
+            return found[1]["plate"], found[0]
+        if any(ch.isdigit() for ch in plate_or_name):
+            plate = normalize_plate(plate_or_name)
+            return plate, self.name_for_plate(plate)
+        names = [f"{e['name']} ({', '.join(e['aliases'])})" if e["aliases"] else e["name"] for e in self.all()]
+        raise CoParkError(
+            f"No saved plate called '{plate_or_name}'. Saved names: {', '.join(names) or 'none yet'}. "
+            "Use one of these names, or a number plate."
+        )
+
+
 class CoParkClient:
     def __init__(
         self,
@@ -118,7 +207,9 @@ class CoParkClient:
         password: str | None = None,
         token_file: str | None = None,
         transport: httpx.BaseTransport | None = None,
+        plates_file: str | None = None,
     ) -> None:
+        self.saved = SavedPlates(Path(plates_file) if plates_file else CONFIG_DIR / "plates.json")
         self.username = username or os.environ.get("COPARK_USERNAME")
         self.password = password or os.environ.get("COPARK_PASSWORD")
         self.token_file = Path(
@@ -233,9 +324,9 @@ class CoParkClient:
     def lookup_plate(self, plate: str) -> str | None:
         return self._request("GET", f"public/user/platenumber/lookup/{normalize_plate(plate)}.json").get("message")
 
-    def order_guest_permit(self, plate: str, product_id: str | None = None) -> dict:
+    def order_guest_permit(self, plate_or_name: str, product_id: str | None = None) -> dict:
+        plate, saved_name = self.saved.resolve(plate_or_name)
         product_id = product_id or self.guest_product_id()
-        plate = normalize_plate(plate)
         start = datetime.now(TZ).strftime("%Y-%m-%d 00:00")
 
         quote = self._request(
@@ -267,6 +358,7 @@ class CoParkClient:
             "status": order.get("status"),
             "product": order.get("productName"),
             "plates": order.get("plateNumbers"),
+            "saved_as": saved_name,
             "valid_from": order.get("fromTime"),
             "valid_to": order.get("toTimeInclusive"),
             "price_dkk": (order.get("priceCents") or 0) / 100,
@@ -288,6 +380,8 @@ class CoParkClient:
             for a in batch:
                 item = _agreement(a)
                 if not guest_only or item["is_guest_permit"]:
+                    names = [n for n in (self.saved.name_for_plate(p) for p in item["plates"] or []) if n]
+                    item["saved_as"] = names[0] if names else None
                     out.append(item)
             page += 1
             if len(batch) < PAGE_SIZE or page * PAGE_SIZE >= (data.get("totalParkingAgreementCount") or 0):
@@ -308,11 +402,12 @@ class CoParkClient:
             if k in counts:
                 counts[k] += 1
                 for pl in p.get("plates") or []:
-                    plates[pl] = plates.get(pl, 0) + 1
+                    label = f"{p['saved_as']} ({pl})" if p.get("saved_as") else pl
+                    plates[label] = plates.get(label, 0) + 1
         result = {
             "this_month": counts[keys[0]],
             "per_month": counts,
-            "plates": dict(sorted(plates.items(), key=lambda kv: -kv[1])),
+            "by_plate": dict(sorted(plates.items(), key=lambda kv: -kv[1])),
         }
         limit = os.environ.get("COPARK_MONTHLY_LIMIT", "")
         if limit.isdigit():
@@ -335,14 +430,55 @@ def client() -> CoParkClient:
 
 
 @mcp.tool()
-def order_guest_permit(plate: str) -> dict:
-    """Order a CoPark guest permit for a number plate, starting now.
+def order_guest_permit(plate_or_name: str) -> dict:
+    """Order a CoPark guest permit, starting now, for a number plate or a saved name.
 
-    CoPark only sells guest permits from the current moment (no future start dates),
-    so call this on the day the guest arrives. The duration is set by the parking area.
-    Refuses paid products unless COPARK_ALLOW_PAID=1.
+    When the user refers to a person or group ("my parents", "the cleaners", "mor og far"),
+    call list_saved_plates first and pass the saved name that means the same thing, even if
+    worded differently. If none clearly matches, or several could, ask the user instead of
+    guessing: a wrong plate means the guest gets a parking fine.
+
+    CoPark only sells guest permits from the current moment (no future start dates), so call
+    this on the day the guest arrives. The duration is set by the parking area. Refuses paid
+    products unless COPARK_ALLOW_PAID=1.
     """
-    return client().order_guest_permit(plate)
+    return client().order_guest_permit(plate_or_name)
+
+
+@mcp.tool()
+def list_saved_plates() -> list[dict]:
+    """Saved number plates with their names, aliases, car description and notes.
+
+    Use this to map how the user refers to someone ("mom and dad", "rengøringen") to a saved
+    name ("parents", "cleaners") before ordering or when reading history.
+    """
+    return client().saved.all()
+
+
+@mcp.tool()
+def save_plate(name: str, plate: str, aliases: list[str] | None = None, note: str | None = None) -> dict:
+    """Save a number plate under a name, e.g. name="parents", plate="AB12345".
+
+    Add aliases for other ways the user refers to them (e.g. ["mom and dad", "mor og far"]).
+    Saving an existing name replaces it. The plate is checked against the Danish vehicle
+    register and the car's description is returned; read it back to the user so they can
+    catch typos.
+    """
+    car = None
+    try:
+        car = client().lookup_plate(plate)
+    except (CoParkError, httpx.HTTPError):
+        pass
+    entry = client().saved.save(name, plate, aliases, car=car, note=note)
+    if not car:
+        entry["warning"] = "Plate not found in the vehicle register; double-check it."
+    return entry
+
+
+@mcp.tool()
+def remove_saved_plate(name: str) -> str:
+    """Delete a saved plate by name or alias."""
+    return "Removed." if client().saved.remove(name) else f"No saved plate called '{name}'."
 
 
 @mcp.tool()
@@ -353,13 +489,13 @@ def list_permits(guest_only: bool = True) -> list[dict]:
 
 @mcp.tool()
 def permit_history(limit: int = 20) -> list[dict]:
-    """Past guest permits, newest first, with plate and validity period."""
+    """Past guest permits, newest first, with plate, saved name (if any) and validity period."""
     return client().history(guest_only=True, max_items=limit)
 
 
 @mcp.tool()
 def guest_permit_usage(months: int = 12) -> dict:
-    """Guest permits used per month and per plate.
+    """Guest permits used per month and per plate (labelled with saved names where known).
 
     If COPARK_MONTHLY_LIMIT is set, also shows how many are left this month.
     """
@@ -460,6 +596,14 @@ def main(argv: list[str]) -> None:
             setup()
         elif cmd == "order" and len(args) == 1:
             _print(client().order_guest_permit(args[0]))
+        elif cmd == "plates":
+            _print(client().saved.all())
+        elif cmd == "save" and len(args) >= 2:
+            cl = client()
+            car = cl.lookup_plate(args[1])
+            _print(cl.saved.save(args[0], args[1], aliases=args[2:], car=car))
+        elif cmd == "forget" and len(args) == 1:
+            print("Removed." if client().saved.remove(args[0]) else "Not found.")
         elif cmd == "list":
             _print(client().active_permits())
         elif cmd == "history":

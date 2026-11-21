@@ -55,7 +55,8 @@ def client_for(tmp_path, monkeypatch):
     def make(transport, token="STALE"):
         tf = tmp_path / "token"
         tf.write_text(token)
-        return c.CoParkClient("12345678", "pw", token_file=str(tf), transport=transport)
+        return c.CoParkClient("12345678", "pw", token_file=str(tf), transport=transport,
+                              plates_file=str(tmp_path / "plates.json"))
     return make
 
 
@@ -97,7 +98,7 @@ def test_history_pages_and_usage(client_for, monkeypatch):
     assert len(cl.history()) == 45
     u = cl.monthly_usage(2)
     assert u["this_month"] == 45 and u["remaining_this_month"] == 5
-    assert set(u["plates"]) == {"AB12345", "CD67890"}
+    assert set(u["by_plate"]) == {"AB12345", "CD67890"}
 
 
 def test_env_file_loading(tmp_path, monkeypatch):
@@ -110,3 +111,31 @@ def test_env_file_loading(tmp_path, monkeypatch):
     assert os.environ["COPARK_USERNAME"] == "12345678"
     assert os.environ["COPARK_PASSWORD"] == "from-env"  # real env wins
     assert "COPARK_MONTHLY_LIMIT" not in os.environ or os.environ["COPARK_MONTHLY_LIMIT"] != ""
+
+
+def test_saved_plates_resolve(tmp_path):
+    store = c.SavedPlates(tmp_path / "plates.json")
+    store.save("Parents", "ab 12 345", aliases=["Mom and Dad", "mor og far", "parents"], car="Grå Skoda Fabia")
+    assert store.find("PARENTS")[0] == "parents"
+    assert store.resolve("mom  and dad") == ("AB12345", "parents")
+    assert store.resolve("cd67890") == ("CD67890", None)
+    assert store.resolve("AB12345") == ("AB12345", "parents")
+    assert store.all()[0]["aliases"] == ["mom and dad", "mor og far"]
+    with pytest.raises(c.CoParkError, match=r"Saved names: parents \(mom and dad, mor og far\)"):
+        store.resolve("grandma")
+    assert store.remove("mor og far") and store.all() == []
+
+
+def test_order_by_saved_name_and_usage_labels(client_for):
+    ym = datetime.now(c.TZ).strftime("%Y-%m")
+    hist = [{"id": "1", "productName": "Gæstetilladelse", "plateNumbers": ["AB12345"], "validFromTime": f"{ym}-02 10:00:00"},
+            {"id": "2", "productName": "Gæstetilladelse", "plateNumbers": ["CD67890"], "validFromTime": f"{ym}-03 10:00:00"}]
+    transport, calls, _ = make_api(history=hist)
+    cl = client_for(transport, token="OK")
+    cl.saved.save("cleaners", "AB12345", aliases=["rengøringen"])
+    res = cl.order_guest_permit("Rengøringen")
+    assert res["saved_as"] == "cleaners"
+    order = next(x for x in calls if x["path"].endswith("place_order.action"))
+    assert order["body"]["plateNumbers"] == ["AB12345"]
+    assert cl.history()[0]["saved_as"] == "cleaners"
+    assert cl.monthly_usage(1)["by_plate"] == {"cleaners (AB12345)": 1, "CD67890": 1}
