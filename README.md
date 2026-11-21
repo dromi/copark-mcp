@@ -80,11 +80,14 @@ loginctl enable-linger "$USER"
 The server has no authentication of its own. Keep it on localhost or your LAN, or put it behind a
 proxy that adds auth. If you need to reach it from the internet (for example to add it as a
 custom connector in Claude), `setup` gives it a long random URL path (`COPARK_MCP_PATH`), which
-works as a shared secret. With Tailscale Funnel:
+works as a shared secret. Claude's custom connectors don't accept URLs with a port number, so
+serve it on the default HTTPS port. With Tailscale Funnel, mount it under its secret path (this
+coexists with anything else you serve on the same machine):
 
 ```bash
-tailscale funnel --bg --https=8443 http://127.0.0.1:8766
-# connector URL: https://<machine>.<tailnet>.ts.net:8443<COPARK_MCP_PATH>
+P=$(grep COPARK_MCP_PATH ~/.config/copark-mcp/env | cut -d= -f2)
+tailscale funnel --bg --set-path "$P" "http://127.0.0.1:8766$P"
+# connector URL: https://<machine>.<tailnet>.ts.net<COPARK_MCP_PATH>
 ```
 
 ## Book permits on a schedule
