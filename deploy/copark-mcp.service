@@ -1,0 +1,21 @@
+# systemd user service running copark-mcp as a streamable-HTTP MCP server.
+#
+#   copark-mcp setup                                   # once, stores credentials locally
+#   cp deploy/copark-mcp.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now copark-mcp
+#   loginctl enable-linger "$USER"                     # keep it running after logout
+#
+# Credentials are read from ~/.config/copark-mcp/env, never from this file.
+[Unit]
+Description=CoPark guest permit MCP server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/copark-mcp --http 8766
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
