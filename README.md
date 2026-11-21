@@ -5,7 +5,9 @@ Unofficial MCP server and CLI for **CoPark guest parking permits** (gæstetillad
 [CoPark](https://copark.dk) only offers an app and a web portal for ordering guest permits.
 This project talks to the same API as the web portal, so you can order permits from Claude or any
 other MCP client, check your history, or book them on a schedule from cron. Useful if you have
-cleaners, a babysitter or family visiting on a regular basis.
+a gardener, a dog walker or anyone else who visits on a regular basis.
+
+![An AI assistant ordering a guest permit through copark-mcp](assets/demo-chat.gif)
 
 > Not affiliated with CoPark or Giant Leap. The API is undocumented and may change without notice.
 
@@ -13,10 +15,10 @@ cleaners, a babysitter or family visiting on a regular basis.
 
 | MCP tool | CLI | What it does |
 |---|---|---|
-| `order_guest_permit(plate_or_name)` | `copark-mcp order parents` | Orders a guest permit, starting now, for a plate or a saved name |
-| `save_plate(name, plate, aliases)` | `copark-mcp save parents AB12345 "mom and dad"` | Saves a plate under a name, checks it against the vehicle register |
+| `order_guest_permit(plate_or_name)` | `copark-mcp order gardener` | Orders a guest permit, starting now, for a plate or a saved name |
+| `save_plate(name, plate, aliases)` | `copark-mcp save gardener AB12345 havemanden` | Saves a plate under a name, checks it against the vehicle register |
 | `list_saved_plates()` | `copark-mcp plates` | Saved plates with names, aliases and car descriptions |
-| `remove_saved_plate(name)` | `copark-mcp forget parents` | Deletes a saved plate |
+| `remove_saved_plate(name)` | `copark-mcp forget gardener` | Deletes a saved plate |
 | `list_permits()` | `copark-mcp list` | Currently active permits |
 | `permit_history(limit)` | `copark-mcp history 20` | Past guest permits, newest first |
 | `guest_permit_usage(months)` | `copark-mcp usage` | Guest permits per month and per plate (with saved names), plus how many are left if you set a monthly limit |
@@ -32,15 +34,19 @@ lists them.
 Save the plates you use often under a name, then order by name:
 
 ```bash
-copark-mcp save cleaners AB12345 "rengøringen"
-copark-mcp save parents CD67890 "mom and dad" "mor og far"
-copark-mcp order cleaners
+copark-mcp save gardener AB12345 havemanden
+copark-mcp save "dog walker" CD67890 hundelufteren
+copark-mcp order gardener
 ```
 
-From Claude, just say "save my parents' plate CD67890" and later "get a guest permit for mom and dad".
+From Claude, just say "save the dog walker's plate, CD67890" and later "our dog sitter is coming today,
+sort out parking". The model finds "dog walker" in the saved list even though the wording differs;
+aliases are only needed for the CLI or for names the model couldn't guess.
 The server matches names and aliases exactly (ignoring case); the tool descriptions tell the model
 to check the saved list and map looser wording to the right name, and to ask when it's unsure.
 If a name isn't found, the error lists the saved names so the model can pick the right one.
+
+![The copark-mcp CLI saving a plate, ordering a permit and showing usage](assets/demo-cli.gif)
 
 Saved plates live in `~/.config/copark-mcp/plates.json` on the machine running the server,
 never in the repository. History and usage are labelled with saved names.
@@ -122,11 +128,11 @@ No LLM is needed for a fixed schedule; cron and the CLI are enough.
 
 ```cron
 # Every Monday at 07:30
-30 7 * * 1  ~/.local/bin/copark-mcp order cleaners >> ~/copark.log 2>&1
+30 7 * * 1  ~/.local/bin/copark-mcp order gardener >> ~/copark.log 2>&1
 
 # Every third Tuesday: cron can't count weeks, so check the ISO week number.
 # Change "-eq 0" to 1 or 2 to shift which week it fires.
-30 7 * * 2  [ $(( $(date +\%V) \% 3 )) -eq 0 ] && ~/.local/bin/copark-mcp order cleaners >> ~/copark.log 2>&1
+30 7 * * 2  [ $(( $(date +\%V) \% 3 )) -eq 0 ] && ~/.local/bin/copark-mcp order gardener >> ~/copark.log 2>&1
 ```
 
 ## Limitations

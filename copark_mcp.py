@@ -32,7 +32,7 @@ Usage:
   copark-mcp --http [port]      MCP over streamable HTTP (default port 8766)
   copark-mcp order <plate|name> order a guest permit now, for a plate or a saved name
   copark-mcp save <name> <plate> [alias...]
-                                save a plate under a name, e.g. save parents AB12345 "mom and dad"
+                                save a plate under a name, e.g. save gardener AB12345 havemanden
   copark-mcp plates             saved plates
   copark-mcp forget <name>      delete a saved plate
   copark-mcp list               active permits
@@ -117,10 +117,10 @@ def _agreement(a: dict) -> dict:
 
 
 class SavedPlates:
-    """Named number plates ("parents", "cleaners"), stored as JSON next to the config.
+    """Named number plates ("gardener", "dog walker"), stored as JSON next to the config.
 
     Matching here is exact (case-insensitive) on the name or one of its aliases. Mapping
-    looser wording ("mom and dad" -> "parents") is left to the MCP client, which gets the
+    looser wording ("the dog sitter" -> "dog walker") is left to the MCP client, which gets the
     saved list from list_saved_plates or from the error when a name isn't found.
     """
 
@@ -433,7 +433,7 @@ def client() -> CoParkClient:
 def order_guest_permit(plate_or_name: str) -> dict:
     """Order a CoPark guest permit, starting now, for a number plate or a saved name.
 
-    When the user refers to a person or group ("my parents", "the cleaners", "mor og far"),
+    When the user refers to a person or group ("the gardener", "our dog sitter", "havemanden"),
     call list_saved_plates first and pass the saved name that means the same thing, even if
     worded differently. If none clearly matches, or several could, ask the user instead of
     guessing: a wrong plate means the guest gets a parking fine.
@@ -449,17 +449,17 @@ def order_guest_permit(plate_or_name: str) -> dict:
 def list_saved_plates() -> list[dict]:
     """Saved number plates with their names, aliases, car description and notes.
 
-    Use this to map how the user refers to someone ("mom and dad", "rengøringen") to a saved
-    name ("parents", "cleaners") before ordering or when reading history.
+    Use this to map how the user refers to someone ("the dog sitter", "havemanden") to a saved
+    name ("dog walker", "gardener") before ordering or when reading history.
     """
     return client().saved.all()
 
 
 @mcp.tool()
 def save_plate(name: str, plate: str, aliases: list[str] | None = None, note: str | None = None) -> dict:
-    """Save a number plate under a name, e.g. name="parents", plate="AB12345".
+    """Save a number plate under a name, e.g. name="gardener", plate="AB12345".
 
-    Add aliases for other ways the user refers to them (e.g. ["mom and dad", "mor og far"]).
+    Add aliases for other ways the user refers to them (e.g. ["havemanden", "the garden guy"]).
     Saving an existing name replaces it. The plate is checked against the Danish vehicle
     register and the car's description is returned; read it back to the user so they can
     catch typos.

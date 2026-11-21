@@ -115,15 +115,15 @@ def test_env_file_loading(tmp_path, monkeypatch):
 
 def test_saved_plates_resolve(tmp_path):
     store = c.SavedPlates(tmp_path / "plates.json")
-    store.save("Parents", "ab 12 345", aliases=["Mom and Dad", "mor og far", "parents"], car="Grå Skoda Fabia")
-    assert store.find("PARENTS")[0] == "parents"
-    assert store.resolve("mom  and dad") == ("AB12345", "parents")
+    store.save("Gardener", "ab 12 345", aliases=["Havemanden", "the garden guy", "gardener"], car="Hvid Toyota Yaris")
+    assert store.find("GARDENER")[0] == "gardener"
+    assert store.resolve("the  garden guy") == ("AB12345", "gardener")
     assert store.resolve("cd67890") == ("CD67890", None)
-    assert store.resolve("AB12345") == ("AB12345", "parents")
-    assert store.all()[0]["aliases"] == ["mom and dad", "mor og far"]
-    with pytest.raises(c.CoParkError, match=r"Saved names: parents \(mom and dad, mor og far\)"):
+    assert store.resolve("AB12345") == ("AB12345", "gardener")
+    assert store.all()[0]["aliases"] == ["havemanden", "the garden guy"]
+    with pytest.raises(c.CoParkError, match=r"Saved names: gardener \(havemanden, the garden guy\)"):
         store.resolve("grandma")
-    assert store.remove("mor og far") and store.all() == []
+    assert store.remove("havemanden") and store.all() == []
 
 
 def test_order_by_saved_name_and_usage_labels(client_for):
@@ -132,10 +132,10 @@ def test_order_by_saved_name_and_usage_labels(client_for):
             {"id": "2", "productName": "Gæstetilladelse", "plateNumbers": ["CD67890"], "validFromTime": f"{ym}-03 10:00:00"}]
     transport, calls, _ = make_api(history=hist)
     cl = client_for(transport, token="OK")
-    cl.saved.save("cleaners", "AB12345", aliases=["rengøringen"])
-    res = cl.order_guest_permit("Rengøringen")
-    assert res["saved_as"] == "cleaners"
+    cl.saved.save("dog walker", "AB12345", aliases=["hundelufteren"])
+    res = cl.order_guest_permit("Hundelufteren")
+    assert res["saved_as"] == "dog walker"
     order = next(x for x in calls if x["path"].endswith("place_order.action"))
     assert order["body"]["plateNumbers"] == ["AB12345"]
-    assert cl.history()[0]["saved_as"] == "cleaners"
-    assert cl.monthly_usage(1)["by_plate"] == {"cleaners (AB12345)": 1, "CD67890": 1}
+    assert cl.history()[0]["saved_as"] == "dog walker"
+    assert cl.monthly_usage(1)["by_plate"] == {"dog walker (AB12345)": 1, "CD67890": 1}
