@@ -21,6 +21,8 @@ Settings:
   COPARK_TOKEN_FILE        optional; session token cache (default ~/.config/copark-mcp/token)
   COPARK_MCP_HOST          optional; bind address for --http (default 127.0.0.1)
   COPARK_MCP_PATH          optional; URL path for --http (default /mcp)
+  COPARK_MCP_ALLOWED_HOSTS optional; public hostname(s) the --http server is reached by, comma-
+                           separated. Requests for other hosts are rejected. Unset: no host check
   COPARK_CONFIG_DIR        optional; where env + token live (default ~/.config/copark-mcp)
 
 Usage:
@@ -382,6 +384,25 @@ def _print(obj) -> None:
     print(json.dumps(obj, ensure_ascii=False, indent=2))
 
 
+def _transport_security():
+    """Host-header checking for --http.
+
+    The MCP SDK only accepts Host: localhost by default when bound to 127.0.0.1, which breaks
+    reverse proxies and tunnels. COPARK_MCP_ALLOWED_HOSTS (comma-separated public hostnames)
+    keeps the check on and allows those; if unset, the check is off.
+    """
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    hosts = [h.strip() for h in os.environ.get("COPARK_MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
+    if not hosts:
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[*hosts, *(f"{h}:*" for h in hosts), "127.0.0.1:*", "localhost:*"],
+        allowed_origins=[*(f"https://{h}" for h in hosts), "http://127.0.0.1:*", "http://localhost:*"],
+    )
+
+
 def setup() -> None:
     """Interactive first-time setup: asks for credentials and writes them to ENV_FILE (mode 600)."""
     import getpass
@@ -405,6 +426,8 @@ def setup() -> None:
         "COPARK_USERNAME": ask("COPARK_USERNAME", "CoPark login (mobile number; 8 digits for Danish numbers)"),
         "COPARK_PASSWORD": ask("COPARK_PASSWORD", "CoPark password", secret=True),
         "COPARK_MONTHLY_LIMIT": ask("COPARK_MONTHLY_LIMIT", "Guest permits allowed per month (blank if none)"),
+        "COPARK_MCP_ALLOWED_HOSTS": ask("COPARK_MCP_ALLOWED_HOSTS",
+                                        "Public hostname for --http, e.g. myhost.example.ts.net (blank if none)"),
         "COPARK_GUEST_PRODUCT_ID": current.get("COPARK_GUEST_PRODUCT_ID", ""),
         "COPARK_MCP_PATH": current.get("COPARK_MCP_PATH") or f"/mcp-{secrets.token_hex(16)}",
     }
@@ -449,6 +472,7 @@ def main(argv: list[str]) -> None:
             mcp.settings.host = os.environ.get("COPARK_MCP_HOST", "127.0.0.1")
             mcp.settings.port = int(args[0]) if args else 8766
             mcp.settings.streamable_http_path = os.environ.get("COPARK_MCP_PATH", "/mcp")
+            mcp.settings.transport_security = _transport_security()
             mcp.run(transport="streamable-http")
         elif cmd in ("-h", "--help", "help"):
             print(__doc__)

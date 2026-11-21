@@ -90,6 +90,11 @@ tailscale funnel --bg --set-path "$P" "http://127.0.0.1:8766$P"
 # connector URL: https://<machine>.<tailnet>.ts.net<COPARK_MCP_PATH>
 ```
 
+Set `COPARK_MCP_ALLOWED_HOSTS` (asked by `setup`) to that public hostname, e.g.
+`machine.tailnet.ts.net`, so the server only answers requests addressed to it. Without it the
+host check is off. Behind a proxy, the MCP SDK's default localhost-only check would answer
+`421 Invalid Host header`.
+
 ## Book permits on a schedule
 
 No LLM is needed for a fixed schedule; cron and the CLI are enough.
