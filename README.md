@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.gif" alt="copark-mcp: guest parking permits for AI assistants and cron jobs" width="760">
+  <img src="assets/logo.gif" alt="copark-mcp: guest parking permits for AI assistants" width="760">
 </p>
 
 # copark-mcp
